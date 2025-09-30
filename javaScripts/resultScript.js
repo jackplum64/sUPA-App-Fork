@@ -3,7 +3,7 @@ let allPropResults = {};
 let propSummary = {};
 let propList = [];
 let currentProp = null;
-let currentMode = 'single'; // 'single', 'comparison', 'all'
+let currentMode = 'single';
 let chartInstances = {};
 
 const requirements = [
@@ -20,7 +20,6 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 
 function initializeElements() {
-    // Get all DOM elements
     window.elements = {
         propSelect: document.getElementById("propSelect"),
         altitudeSelect: document.getElementById("altitudeSelect"),
@@ -88,7 +87,6 @@ function loadResults() {
 }
 
 function loadMotorResults() {
-    // Load all data from localStorage
     allPropResults = JSON.parse(localStorage.getItem("allPropResults")) || {};
     propSummary = JSON.parse(localStorage.getItem("propSummary")) || {};
     propList = JSON.parse(localStorage.getItem("propList")) || [];
@@ -101,30 +99,16 @@ function loadMotorResults() {
         return;
     }
 
-    // Set current prop to first available or best prop
     currentProp = bestProp || propList[0];
 
-    // Populate motor information
     const firstPropData = allPropResults[currentProp];
     elements.motorInformationBar.innerHTML = 
         `Motor(s): ${motorInfo.motoNum} ${motorInfo.motor} | Battery: ${motorInfo.battery} | Weight: ${totalWeight}lbs`;
 
-    // Populate propeller selector
     populatePropSelect();
-    
-    // Populate altitude selector
     populateAltitudeSelect();
-
-    // Show best prop recommendation
     showBestPropRecommendation(bestProp);
-
-    // Show prop summary cards
     showPropSummaryCards();
-
-    // Update requirements
-    updateRequirements();
-
-    // Initial display update
     updateDisplay();
 }
 
@@ -134,15 +118,12 @@ function loadAeroOnlyResults() {
     
     elements.motorInformationBar.innerHTML = `Weight: ${maxResults.weight}lbs | Aerodynamic Analysis Only`;
     
-    // Hide motor-specific sections
     elements.bestPropSection.style.display = "none";
     elements.propSummarySection.style.display = "none";
     elements.comparisonSection.style.display = "none";
     
-    // Show basic requirements
     updateRequirementsAeroOnly(maxResults);
     
-    // Setup basic altitude selector
     for (let altitude in results) {
         let option = document.createElement("option");
         option.value = altitude;
@@ -228,26 +209,80 @@ function showPropSummaryCards() {
     });
 }
 
+// NEW FUNCTION: Compute altitude-specific performance metrics
+function computeAltitudeSpecificMetrics(propData, altitude) {
+    if (!propData.results[altitude]) return null;
+
+    const altResults = propData.results[altitude];
+    let maxSpeed = 0;
+    let minSpeed = 100;
+    let maxEndurance = 0;
+    let maxEnduranceSpeed = 0;
+
+    Object.keys(altResults).forEach(velocity => {
+        const vel = parseInt(velocity);
+        const data = altResults[velocity];
+        const aoa = parseFloat(data.AoA);
+        const thrust = parseFloat(data.thrust);
+        const dragOz = parseFloat(data.dragOz);
+        const endurance = parseFloat(data.endurance);
+
+        // Valid flight envelope: AoA < 16 and thrust > drag
+        if (aoa < 16 && !isNaN(thrust) && thrust > dragOz) {
+            // Track max speed
+            if (vel > maxSpeed && aoa < 11) {
+                maxSpeed = vel;
+            }
+            
+            // Track min speed (stall speed)
+            if (vel < minSpeed) {
+                minSpeed = vel;
+            }
+
+            // Track max endurance
+            if (endurance > maxEndurance && aoa < 7) {
+                maxEndurance = endurance;
+                maxEnduranceSpeed = vel;
+            }
+        }
+    });
+
+    return {
+        maxSpeed: maxSpeed,
+        minSpeed: minSpeed,
+        maxEndurance: maxEndurance,
+        maxEnduranceSpeed: maxEnduranceSpeed
+    };
+}
+
 function updateRequirements() {
     if (!currentProp || !allPropResults[currentProp]) return;
 
-    const maxVals = allPropResults[currentProp].maxVals;
+    const selectedAltitude = elements.altitudeSelect.value;
+    const propData = allPropResults[currentProp];
     
-    // Requirement 1 - Flight time
+    // Compute altitude-specific metrics
+    const altMetrics = computeAltitudeSpecificMetrics(propData, selectedAltitude);
+    const maxVals = propData.maxVals;
+    
+    // Requirement 1 - Flight time (use altitude-specific if available, otherwise global)
+    const enduranceValue = altMetrics ? altMetrics.maxEndurance : (maxVals.endurance?.maxEndurance || 0);
     updateRequirementStatus(elements.requirements.req1, 
-        maxVals.endurance?.maxEndurance || 0, requirements[0]);
+        enduranceValue, requirements[0]);
     
-    // Requirement 2 - Service ceiling
+    // Requirement 2 - Service ceiling (always global)
     updateRequirementStatus(elements.requirements.req2, 
         maxVals.maxAltitude || 0, requirements[1]);
     
-    // Requirement 3 - Min speed
+    // Requirement 3 - Min speed (stall speed) - use altitude-specific
+    const minSpeedValue = altMetrics ? altMetrics.minSpeed : (maxVals.minSpeed?.minCalcVelocity || 100);
     updateRequirementStatus(elements.requirements.req3, 
-        requirements[2][1], [maxVals.minSpeed?.minCalcVelocity || 100, maxVals.minSpeed?.minCalcVelocity || 100], true);
+        requirements[2][1], [minSpeedValue, minSpeedValue], true);
     
-    // Requirement 4 - Max speed
+    // Requirement 4 - Max speed - use altitude-specific
+    const maxSpeedValue = altMetrics ? altMetrics.maxSpeed : (maxVals.maxSpeed?.maxCalcVelocity || 0);
     updateRequirementStatus(elements.requirements.req4, 
-        maxVals.maxSpeed?.maxCalcVelocity || 0, requirements[3]);
+        maxSpeedValue, requirements[3]);
 }
 
 function updateRequirementsAeroOnly(maxResults) {
@@ -255,7 +290,6 @@ function updateRequirementsAeroOnly(maxResults) {
     elements.requirements.req2.innerHTML += "Not Available";
     elements.requirements.req4.innerHTML += "Not Available";
     
-    // Only min speed available
     updateRequirementStatus(elements.requirements.req3, 
         requirements[2][1], [maxResults.minSpeed?.minCalcVelocity || 100, maxResults.minSpeed?.minCalcVelocity || 100], true);
 }
@@ -285,6 +319,9 @@ function removeClasses(element) {
 }
 
 function updateDisplay() {
+    // Update requirements with altitude-specific values
+    updateRequirements();
+    
     switch (currentMode) {
         case 'single':
             showSinglePropView();
@@ -299,7 +336,6 @@ function updateDisplay() {
 }
 
 function showSinglePropView() {
-    // Show/hide sections
     elements.comparisonSection.style.display = "none";
     elements.individualChartsSection.style.display = "block";
     elements.resultsTable.style.display = "table";
@@ -308,13 +344,8 @@ function showSinglePropView() {
 
     const propData = allPropResults[currentProp];
     
-    // Update performance summary
     updatePerformanceSummary(propData);
-    
-    // Update table
     updateTable(propData);
-    
-    // Update individual charts
     updateIndividualCharts(propData);
 }
 
@@ -337,6 +368,8 @@ function showAllPropsView() {
 
 function updatePerformanceSummary(propData) {
     const maxVals = propData.maxVals;
+    const selectedAltitude = elements.altitudeSelect.value;
+    const altMetrics = computeAltitudeSpecificMetrics(propData, selectedAltitude);
     const batteryEnergy = localStorage.getItem("batteryEnergy");
     
     if (maxVals.endurance) {
@@ -344,17 +377,20 @@ function updatePerformanceSummary(propData) {
         const batteryObjective = calcBatt(45, maxVals.endurance.maxEnduranceAmps);
         
         elements.resultLog.innerHTML = `
+            <strong>Global Performance:</strong><br>
             Max endurance is ${maxVals.endurance.maxEndurance.toFixed(0)} minutes at ${maxVals.endurance.maxEnduranceVelocity} mph 
             at ${maxVals.endurance.maxEnduranceAltitude} ft (msl) pulling ${maxVals.endurance.maxEnduranceAmps.toFixed(2)} amps.<br>
             Battery capacity required for: Threshold: ${batteryThreshold.toFixed(0)}mAh, Objective: ${batteryObjective.toFixed(0)}mAh.<br>
             Max speed is ${maxVals.maxSpeed.maxCalcVelocity} mph at ${maxVals.maxSpeed.maxCalcVelocityAltitude} ft (msl).<br>
             Min stall speed is ${maxVals.minSpeed.minCalcVelocity} mph at ${maxVals.minSpeed.minCalcVelocityAltitude} ft (msl).<br>
-            Maximum calculated altitude is ${maxVals.maxAltitude} ft (msl).
+            Maximum calculated altitude is ${maxVals.maxAltitude} ft (msl).<br><br>
+            <strong>Performance at ${selectedAltitude} ft:</strong><br>
+            Max speed: ${altMetrics.maxSpeed} mph<br>
+            Min speed (stall): ${altMetrics.minSpeed} mph<br>
+            Max endurance: ${altMetrics.maxEndurance.toFixed(0)} minutes at ${altMetrics.maxEnduranceSpeed} mph
         `;
     }
 
-    // Update altitude-specific information
-    const selectedAltitude = elements.altitudeSelect.value;
     if (selectedAltitude && propData.altResults && propData.altResults[selectedAltitude]) {
         const altInfo = propData.altResults[selectedAltitude];
         elements.altitudeInformation.innerHTML = 
@@ -420,7 +456,6 @@ function updateIndividualCharts(propData) {
         thrustRequired.push(parseFloat(data.dragOz));
     });
 
-    // L/D Chart
     updateChart("ldChart", {
         type: "line",
         data: {
@@ -450,7 +485,6 @@ function updateIndividualCharts(propData) {
         }
     });
 
-    // Thrust Chart
     const thrustDatasets = [{
         label: "Thrust Required",
         data: thrustRequired,
@@ -574,14 +608,12 @@ function downloadTableData() {
     
     if (!fileName) return;
 
-    // Get headers
     let headers = [];
     table.querySelectorAll("thead th").forEach(th => {
         headers.push(th.innerText);
     });
     csvContent += headers.join(",") + "\n";
 
-    // Get rows
     table.querySelectorAll("tbody tr").forEach(row => {
         let rowData = [];
         row.querySelectorAll("td").forEach(td => {
@@ -590,7 +622,6 @@ function downloadTableData() {
         csvContent += rowData.join(",") + "\n";
     });
 
-    // Download
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
@@ -604,9 +635,7 @@ function calcBatt(time, current) {
     return (time / 60) * current * 1000;
 }
 
-// Initialize the application
 if (motorToggle === "false") {
-    // Hide motor-specific UI elements
     document.addEventListener("DOMContentLoaded", function() {
         elements.bestPropSection.style.display = "none";
         elements.propSummarySection.style.display = "none";
