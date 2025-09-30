@@ -7,52 +7,204 @@
     <link rel="stylesheet" href="./css/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation"></script>
-
+    <style>
+        .prop-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .prop-card {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid white;
+            border-radius: 10px;
+            padding: 15px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .prop-card:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+        .prop-card.best {
+            border-color: #00ff73;
+            background: rgba(0, 255, 115, 0.2);
+        }
+        .comparison-section {
+            margin: 30px 0;
+        }
+        .charts-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .chart-container {
+            background: white;
+            border: 3px solid #003366;
+            border-radius: 10px;
+            padding: 10px;
+        }
+        .comparison-chart {
+            grid-column: 1 / -1;
+            height: 400px;
+        }
+        .controls-panel {
+            background: rgba(2, 2, 17, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        .controls-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            align-items: center;
+        }
+        .controls-grid > div {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .controls-grid label {
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        select, button {
+            padding: 8px 12px;
+            border-radius: 5px;
+            border: none;
+            background: white;
+            color: #003366;
+            font-size: 14px;
+            min-width: 120px;
+        }
+        button {
+            cursor: pointer;
+            background: #66ccff;
+            color: #003366;
+            font-weight: bold;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background: #4db8ff;
+        }
+        .performance-summary {
+            background: rgba(2, 2, 17, 0.6);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        .best-prop-header {
+            color: #00ff73;
+            text-shadow: 0 0 10px rgba(0, 255, 115, 0.5);
+        }
+        @media (max-width: 768px) {
+            .charts-grid {
+                grid-template-columns: 1fr;
+            }
+            .controls-grid {
+                grid-template-columns: 1fr;
+            }
+            .prop-summary {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
 </head>
 <body>
     <h1>Analysis Results</h1>
     <p>sUPA App; Created by Andrew Jesus, 2025</p>
-    <a href = "index.html">Run another analysis.</a> <br>
+    <a href="index.html">Run another analysis.</a>
+
+    <!-- Requirements Status -->
     <div class="requirements">
         <div class="container">
-            <p id="requirement1" >Minimum Flight Time<br>Status: </p>
+            <p id="requirement1">Minimum Flight Time<br>Status: </p>
         </div>
         <div class="container">
-            <p id="requirement2" >Service Celling<br>Status: </p>
+            <p id="requirement2">Service Ceiling<br>Status: </p>
         </div>
         <div class="container">
-            <p id="requirement3" >Minimum Speed<br>Status: </p>
+            <p id="requirement3">Minimum Speed<br>Status: </p>
         </div>
         <div class="container">
-            <p id="requirement4" >Max Speed<br>Status: </p>
+            <p id="requirement4">Max Speed<br>Status: </p>
         </div>
     </div>
-    <p id="informationBar"></p>
-    <div class="charts">
-        <div class="graph">
-            <h2>L/D Ratio vs. Airspeed</h2>
-            <canvas id="ldChart"></canvas>
+
+    <!-- Motor Information -->
+    <p id="motorInformationBar"></p>
+
+    <!-- Best Prop Recommendation -->
+    <div id="bestPropSection" style="display: none;">
+        <h2 class="best-prop-header">Recommended Propeller</h2>
+        <div id="bestPropInfo" class="prop-card best"></div>
+    </div>
+
+    <!-- Propeller Summary Cards -->
+    <div id="propSummarySection" style="display: none;">
+        <h2>Propeller Performance Summary</h2>
+        <p><em>Click any card to view detailed analysis for that propeller</em></p>
+        <div id="propSummaryGrid" class="prop-summary"></div>
+    </div>
+
+    <!-- Comparison Charts -->
+    <div id="comparisonSection" class="comparison-section" style="display: none;">
+        <h2>Propeller Comparison</h2>
+        <div class="chart-container comparison-chart">
+            <canvas id="propComparisonChart"></canvas>
         </div>
-        <div class="graph">
-            <h2>Thrust vs. Airspeed</h2>
-            <canvas id="TaTrChart"></canvas>
-        </div> <br>
-    </div>
-    <p id="resultLog"></p><br>
-    <p id="altitudeInformation"></p>
-
-    <footer>
-        <a class="donate" href="https://venmo.com/u/Andrew-Jesus" target="_blank">Buy me a coffee! &#9749;</a>
-    </footer>
-    <br><br>
-    <div class="optionPanel">
-        <label for="altitudeSelect">Select Altitude (ft):</label>
-        <select id="altitudeSelect"></select>
-        <button id="toggleButton">Hide Table</button> <br> <br>
-        <button id="downloadTable">Download Table</button>
     </div>
 
+    <!-- Controls Panel -->
+    <div class="controls-panel">
+        <div class="controls-grid">
+            <div id="propSelectDiv">
+                <label for="propSelect">Selected Propeller:</label>
+                <select id="propSelect"></select>
+            </div>
+            <div>
+                <label for="altitudeSelect">Altitude (ft):</label>
+                <select id="altitudeSelect"></select>
+            </div>
+            <div>
+                <button id="showAllProps">Show All Props</button>
+            </div>
+            <div>
+                <button id="showComparison">Show Comparison</button>
+            </div>
+            <div>
+                <button id="toggleTable">Hide Table</button>
+            </div>
+            <div>
+                <button id="downloadTable">Download Table</button>
+            </div>
+        </div>
+    </div>
 
+    <!-- Individual Prop Performance Charts -->
+    <div id="individualChartsSection">
+        <div class="charts">
+            <div class="graph">
+                <h2>L/D Ratio vs. Airspeed</h2>
+                <canvas id="ldChart"></canvas>
+            </div>
+            <div class="graph">
+                <h2>Thrust vs. Airspeed</h2>
+                <canvas id="TaTrChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Performance Summary -->
+    <div id="performanceSummary" class="performance-summary">
+        <p id="resultLog"></p>
+        <p id="altitudeInformation"></p>
+    </div>
+
+    <!-- Detailed Data Table -->
     <table id="resultsTable">
         <thead>
             <tr>
@@ -73,6 +225,10 @@
             <!-- Data will be inserted here dynamically -->
         </tbody>
     </table>
+
+    <footer>
+        <a class="donate" href="https://venmo.com/u/Andrew-Jesus" target="_blank">Buy me a coffee! &#9749;</a>
+    </footer>
 
     <script src="./javaScripts/resultScript.js"></script>
 

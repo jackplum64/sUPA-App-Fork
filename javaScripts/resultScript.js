@@ -1,20 +1,587 @@
-var motorToggle = localStorage.getItem("motorToggle");
-let weight;
+let motorToggle = localStorage.getItem("motorToggle");
+let allPropResults = {};
+let propSummary = {};
+let propList = [];
+let currentProp = null;
+let currentMode = 'single'; // 'single', 'comparison', 'all'
+let chartInstances = {};
 
-document.getElementById("downloadTable").addEventListener("click", function () {
-    const table = document.querySelector("#resultsTable");
-    let csvContent = "data:text/csv;charset=utf-8,";
-    let fileName = prompt("Enter file name: ", "results_table.csv")
+const requirements = [
+    [30, 45], // Flight time, minutes
+    [6000, 9000], // Max Cruise Altitude (asl)
+    [25, 20], // Stall speed
+    [45, 50] // Max Speed
+];
+
+document.addEventListener("DOMContentLoaded", function () {
+    initializeElements();
+    loadResults();
+    setupEventListeners();
+});
+
+function initializeElements() {
+    // Get all DOM elements
+    window.elements = {
+        propSelect: document.getElementById("propSelect"),
+        altitudeSelect: document.getElementById("altitudeSelect"),
+        showAllProps: document.getElementById("showAllProps"),
+        showComparison: document.getElementById("showComparison"),
+        toggleTable: document.getElementById("toggleTable"),
+        downloadTable: document.getElementById("downloadTable"),
+        resultsTable: document.getElementById("resultsTable"),
+        bestPropSection: document.getElementById("bestPropSection"),
+        propSummarySection: document.getElementById("propSummarySection"),
+        comparisonSection: document.getElementById("comparisonSection"),
+        individualChartsSection: document.getElementById("individualChartsSection"),
+        motorInformationBar: document.getElementById("motorInformationBar"),
+        resultLog: document.getElementById("resultLog"),
+        altitudeInformation: document.getElementById("altitudeInformation"),
+        requirements: {
+            req1: document.getElementById("requirement1"),
+            req2: document.getElementById("requirement2"),
+            req3: document.getElementById("requirement3"),
+            req4: document.getElementById("requirement4")
+        }
+    };
+}
+
+function setupEventListeners() {
+    elements.propSelect.addEventListener("change", function() {
+        currentProp = this.value;
+        currentMode = 'single';
+        updateDisplay();
+    });
+
+    elements.altitudeSelect.addEventListener("change", function() {
+        updateDisplay();
+    });
+
+    elements.showAllProps.addEventListener("click", function() {
+        currentMode = 'all';
+        updateDisplay();
+    });
+
+    elements.showComparison.addEventListener("click", function() {
+        currentMode = 'comparison';
+        updateDisplay();
+    });
+
+    elements.toggleTable.addEventListener("click", function() {
+        if (elements.resultsTable.classList.contains("hidden")) {
+            elements.resultsTable.classList.remove("hidden");
+            this.textContent = "Hide Table";
+        } else {
+            elements.resultsTable.classList.add("hidden");
+            this.textContent = "Show Table";
+        }
+    });
+
+    elements.downloadTable.addEventListener("click", downloadTableData);
+}
+
+function loadResults() {
+    if (motorToggle === "true") {
+        loadMotorResults();
+    } else {
+        loadAeroOnlyResults();
+    }
+}
+
+function loadMotorResults() {
+    // Load all data from localStorage
+    allPropResults = JSON.parse(localStorage.getItem("allPropResults")) || {};
+    propSummary = JSON.parse(localStorage.getItem("propSummary")) || {};
+    propList = JSON.parse(localStorage.getItem("propList")) || [];
+    const bestProp = localStorage.getItem("bestProp");
+    const motorInfo = JSON.parse(localStorage.getItem("motorInfo")) || {};
+    const totalWeight = localStorage.getItem("totalWeight");
+
+    if (propList.length === 0) {
+        elements.motorInformationBar.innerHTML = "No propeller data found.";
+        return;
+    }
+
+    // Set current prop to first available or best prop
+    currentProp = bestProp || propList[0];
+
+    // Populate motor information
+    const firstPropData = allPropResults[currentProp];
+    elements.motorInformationBar.innerHTML = 
+        `Motor(s): ${motorInfo.motoNum} ${motorInfo.motor} | Battery: ${motorInfo.battery} | Weight: ${totalWeight}lbs`;
+
+    // Populate propeller selector
+    populatePropSelect();
     
+    // Populate altitude selector
+    populateAltitudeSelect();
 
-    // Get table headers
+    // Show best prop recommendation
+    showBestPropRecommendation(bestProp);
+
+    // Show prop summary cards
+    showPropSummaryCards();
+
+    // Update requirements
+    updateRequirements();
+
+    // Initial display update
+    updateDisplay();
+}
+
+function loadAeroOnlyResults() {
+    const results = JSON.parse(localStorage.getItem("analysisResultsNoThrust")) || {};
+    const maxResults = JSON.parse(localStorage.getItem("maxResults")) || {};
+    
+    elements.motorInformationBar.innerHTML = `Weight: ${maxResults.weight}lbs | Aerodynamic Analysis Only`;
+    
+    // Hide motor-specific sections
+    elements.bestPropSection.style.display = "none";
+    elements.propSummarySection.style.display = "none";
+    elements.comparisonSection.style.display = "none";
+    
+    // Show basic requirements
+    updateRequirementsAeroOnly(maxResults);
+    
+    // Setup basic altitude selector
+    for (let altitude in results) {
+        let option = document.createElement("option");
+        option.value = altitude;
+        option.textContent = altitude + " ft";
+        elements.altitudeSelect.appendChild(option);
+    }
+    
+    elements.resultLog.innerHTML = `Min stall speed is ${maxResults.minSpeed?.minCalcVelocity || 'N/A'} mph.`;
+}
+
+function populatePropSelect() {
+    elements.propSelect.innerHTML = "";
+    propList.forEach(propName => {
+        let option = document.createElement("option");
+        option.value = propName;
+        option.textContent = `${propName.replace('_', 'x')} prop`;
+        if (propName === currentProp) option.selected = true;
+        elements.propSelect.appendChild(option);
+    });
+}
+
+function populateAltitudeSelect() {
+    elements.altitudeSelect.innerHTML = "";
+    if (currentProp && allPropResults[currentProp]) {
+        const altitudes = Object.keys(allPropResults[currentProp].results).sort((a, b) => Number(a) - Number(b));
+        altitudes.forEach(altitude => {
+            let option = document.createElement("option");
+            option.value = altitude;
+            option.textContent = altitude + " ft";
+            elements.altitudeSelect.appendChild(option);
+        });
+    }
+}
+
+function showBestPropRecommendation(bestProp) {
+    if (!bestProp || !propSummary[bestProp]) {
+        elements.bestPropSection.style.display = "none";
+        return;
+    }
+
+    elements.bestPropSection.style.display = "block";
+    const summary = propSummary[bestProp];
+    elements.bestPropSection.querySelector("#bestPropInfo").innerHTML = `
+        <h3>${bestProp.replace('_', 'x')} Propeller</h3>
+        <p><strong>Diameter:</strong> ${summary.diameter}" | <strong>Pitch:</strong> ${summary.pitch}"</p>
+        <p><strong>Max Endurance:</strong> ${summary.maxEndurance.toFixed(0)} minutes</p>
+        <p><strong>Speed Range:</strong> ${summary.minSpeed} - ${summary.maxSpeed} mph</p>
+        <p><strong>Service Ceiling:</strong> ${summary.maxAltitude} ft</p>
+    `;
+}
+
+function showPropSummaryCards() {
+    if (propList.length <= 1) {
+        elements.propSummarySection.style.display = "none";
+        return;
+    }
+
+    elements.propSummarySection.style.display = "block";
+    const grid = elements.propSummarySection.querySelector("#propSummaryGrid");
+    grid.innerHTML = "";
+
+    propList.forEach(propName => {
+        const summary = propSummary[propName];
+        const card = document.createElement("div");
+        card.className = "prop-card";
+        card.innerHTML = `
+            <h4>${propName.replace('_', 'x')}</h4>
+            <p><strong>Diameter:</strong> ${summary.diameter}"</p>
+            <p><strong>Pitch:</strong> ${summary.pitch}"</p>
+            <p><strong>Endurance:</strong> ${summary.maxEndurance.toFixed(0)} min</p>
+            <p><strong>Max Speed:</strong> ${summary.maxSpeed} mph</p>
+            <p><strong>Min Speed:</strong> ${summary.minSpeed} mph</p>
+        `;
+        
+        card.addEventListener('click', () => {
+            currentProp = propName;
+            currentMode = 'single';
+            elements.propSelect.value = propName;
+            updateDisplay();
+        });
+        
+        grid.appendChild(card);
+    });
+}
+
+function updateRequirements() {
+    if (!currentProp || !allPropResults[currentProp]) return;
+
+    const maxVals = allPropResults[currentProp].maxVals;
+    
+    // Requirement 1 - Flight time
+    updateRequirementStatus(elements.requirements.req1, 
+        maxVals.endurance?.maxEndurance || 0, requirements[0]);
+    
+    // Requirement 2 - Service ceiling
+    updateRequirementStatus(elements.requirements.req2, 
+        maxVals.maxAltitude || 0, requirements[1]);
+    
+    // Requirement 3 - Min speed
+    updateRequirementStatus(elements.requirements.req3, 
+        requirements[2][1], [maxVals.minSpeed?.minCalcVelocity || 100, maxVals.minSpeed?.minCalcVelocity || 100], true);
+    
+    // Requirement 4 - Max speed
+    updateRequirementStatus(elements.requirements.req4, 
+        maxVals.maxSpeed?.maxCalcVelocity || 0, requirements[3]);
+}
+
+function updateRequirementsAeroOnly(maxResults) {
+    elements.requirements.req1.innerHTML += "Not Available";
+    elements.requirements.req2.innerHTML += "Not Available";
+    elements.requirements.req4.innerHTML += "Not Available";
+    
+    // Only min speed available
+    updateRequirementStatus(elements.requirements.req3, 
+        requirements[2][1], [maxResults.minSpeed?.minCalcVelocity || 100, maxResults.minSpeed?.minCalcVelocity || 100], true);
+}
+
+function updateRequirementStatus(element, value, thresholds, inverse = false) {
+    removeClasses(element);
+    
+    let status;
+    if (inverse) {
+        if (value < thresholds[1]) status = "objective";
+        else if (value < thresholds[0]) status = "threshold";
+        else status = "notMet";
+    } else {
+        if (value >= thresholds[1]) status = "objective";
+        else if (value >= thresholds[0]) status = "threshold";
+        else status = "notMet";
+    }
+    
+    element.classList.add(status);
+    element.innerHTML += status === "objective" ? "Objective" : 
+                        status === "threshold" ? "Threshold" : "Not Met";
+}
+
+function removeClasses(element) {
+    element.classList.remove("notMet", "threshold", "objective");
+    element.innerHTML = element.innerHTML.split('<br>')[0] + '<br>Status: ';
+}
+
+function updateDisplay() {
+    switch (currentMode) {
+        case 'single':
+            showSinglePropView();
+            break;
+        case 'comparison':
+            showComparisonView();
+            break;
+        case 'all':
+            showAllPropsView();
+            break;
+    }
+}
+
+function showSinglePropView() {
+    // Show/hide sections
+    elements.comparisonSection.style.display = "none";
+    elements.individualChartsSection.style.display = "block";
+    elements.resultsTable.style.display = "table";
+
+    if (!currentProp || !allPropResults[currentProp]) return;
+
+    const propData = allPropResults[currentProp];
+    
+    // Update performance summary
+    updatePerformanceSummary(propData);
+    
+    // Update table
+    updateTable(propData);
+    
+    // Update individual charts
+    updateIndividualCharts(propData);
+}
+
+function showComparisonView() {
+    elements.comparisonSection.style.display = "block";
+    elements.individualChartsSection.style.display = "none";
+    elements.resultsTable.style.display = "none";
+    
+    updateComparisonChart();
+}
+
+function showAllPropsView() {
+    elements.comparisonSection.style.display = "block";
+    elements.individualChartsSection.style.display = "block";
+    elements.resultsTable.style.display = "none";
+    
+    updateComparisonChart();
+    if (currentProp) updateIndividualCharts(allPropResults[currentProp]);
+}
+
+function updatePerformanceSummary(propData) {
+    const maxVals = propData.maxVals;
+    const batteryEnergy = localStorage.getItem("batteryEnergy");
+    
+    if (maxVals.endurance) {
+        const batteryThreshold = calcBatt(30, maxVals.endurance.maxEnduranceAmps);
+        const batteryObjective = calcBatt(45, maxVals.endurance.maxEnduranceAmps);
+        
+        elements.resultLog.innerHTML = `
+            Max endurance is ${maxVals.endurance.maxEndurance.toFixed(0)} minutes at ${maxVals.endurance.maxEnduranceVelocity} mph 
+            at ${maxVals.endurance.maxEnduranceAltitude} ft (msl) pulling ${maxVals.endurance.maxEnduranceAmps.toFixed(2)} amps.<br>
+            Battery capacity required for: Threshold: ${batteryThreshold.toFixed(0)}mAh, Objective: ${batteryObjective.toFixed(0)}mAh.<br>
+            Max speed is ${maxVals.maxSpeed.maxCalcVelocity} mph at ${maxVals.maxSpeed.maxCalcVelocityAltitude} ft (msl).<br>
+            Min stall speed is ${maxVals.minSpeed.minCalcVelocity} mph at ${maxVals.minSpeed.minCalcVelocityAltitude} ft (msl).<br>
+            Maximum calculated altitude is ${maxVals.maxAltitude} ft (msl).
+        `;
+    }
+
+    // Update altitude-specific information
+    const selectedAltitude = elements.altitudeSelect.value;
+    if (selectedAltitude && propData.altResults && propData.altResults[selectedAltitude]) {
+        const altInfo = propData.altResults[selectedAltitude];
+        elements.altitudeInformation.innerHTML = 
+            `Maximum climb rate at ${selectedAltitude} ft (msl) is ${altInfo.maxROC} ft/min flying at 
+             ${altInfo.maxROCSpeed} mph at an angle of ${altInfo.maxROCAngle} degrees`;
+    }
+}
+
+function updateTable(propData) {
+    const selectedAltitude = elements.altitudeSelect.value;
+    const tableBody = elements.resultsTable.querySelector("tbody");
+    tableBody.innerHTML = "";
+
+    if (!selectedAltitude || !propData.results[selectedAltitude]) return;
+
+    const results = propData.results[selectedAltitude];
+    Object.keys(results).sort((a, b) => Number(a) - Number(b)).forEach(velocity => {
+        const data = results[velocity];
+        
+        if (data.AoA > 16 || (isNaN(data.throttle) && motorToggle === "true")) return;
+
+        const row = document.createElement("tr");
+        row.innerHTML = `
+            <td>${velocity}</td>
+            <td>${data.dynamicPressure}</td>
+            <td>${data.coefficientLift}</td>
+            <td>${data.AoA}</td>
+            <td>${data.coefficientDrag}</td>
+            <td>${data.dragOz}</td>
+            <td>${data.thrust || 'N/A'}</td>
+            <td>${data.lOverD}</td>
+            <td>${data.endurance || 'N/A'}</td>
+            <td>${data.current || 'N/A'}</td>
+            <td>${data.throttle || 'N/A'}</td>
+        `;
+        tableBody.appendChild(row);
+    });
+}
+
+function updateIndividualCharts(propData) {
+    const selectedAltitude = elements.altitudeSelect.value;
+    if (!selectedAltitude || !propData.results[selectedAltitude]) return;
+
+    const results = propData.results[selectedAltitude];
+    const airspeed = [];
+    const ldRatio = [];
+    const cLThreeHalfD = [];
+    const thrustAvailable = [];
+    const thrustRequired = [];
+    const current = [];
+
+    Object.keys(results).sort((a, b) => Number(a) - Number(b)).forEach(velocity => {
+        if (velocity < 10) return;
+        const data = results[velocity];
+        
+        airspeed.push(parseFloat(velocity));
+        ldRatio.push(parseFloat(data.lOverD));
+        cLThreeHalfD.push(parseFloat(data.cLThreeHalfD));
+        if (data.thrust) {
+            thrustAvailable.push(parseFloat(data.thrust));
+            current.push(parseFloat(data.current));
+        }
+        thrustRequired.push(parseFloat(data.dragOz));
+    });
+
+    // L/D Chart
+    updateChart("ldChart", {
+        type: "line",
+        data: {
+            labels: airspeed,
+            datasets: [{
+                label: "L/D Ratio",
+                data: ldRatio,
+                borderColor: "blue",
+                borderWidth: 2,
+                fill: false,
+                pointRadius: 3
+            }, {
+                label: "cL^(3/2)/cD Ratio",
+                data: cLThreeHalfD,
+                borderColor: "green",
+                borderWidth: 2,
+                fill: false,
+                pointRadius: 3
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                x: { title: { display: true, text: "Airspeed (mph)" }},
+                y: { title: { display: true, text: "L/D Ratio" }}
+            }
+        }
+    });
+
+    // Thrust Chart
+    const thrustDatasets = [{
+        label: "Thrust Required",
+        data: thrustRequired,
+        borderColor: "red",
+        borderWidth: 2,
+        fill: false,
+        pointRadius: 3
+    }];
+
+    if (motorToggle === "true") {
+        thrustDatasets.push({
+            label: "Max Thrust Available",
+            data: thrustAvailable,
+            borderColor: "blue",
+            borderWidth: 2,
+            fill: false,
+            pointRadius: 3
+        });
+
+        thrustDatasets.push({
+            label: "Current Draw",
+            data: current,
+            borderColor: "green",
+            borderWidth: 2,
+            fill: false,
+            pointRadius: 3,
+            yAxisID: "y1"
+        });
+    }
+
+    const thrustChartOptions = {
+        responsive: true,
+        scales: {
+            x: { title: { display: true, text: "Airspeed (mph)" }},
+            y: { title: { display: true, text: "Thrust (oz)" }}
+        }
+    };
+
+    if (motorToggle === "true") {
+        thrustChartOptions.scales.y1 = {
+            title: { display: true, text: "Current (A)" },
+            position: "right",
+            grid: { drawOnChartArea: false }
+        };
+    }
+
+    updateChart("TaTrChart", {
+        type: "line",
+        data: { labels: airspeed, datasets: thrustDatasets },
+        options: thrustChartOptions
+    });
+}
+
+function updateComparisonChart() {
+    const selectedAltitude = elements.altitudeSelect.value;
+    if (!selectedAltitude) return;
+
+    const datasets = [];
+    const colors = ['#ff0000', '#0000ff', '#00ff00', '#ff8800', '#8800ff', '#00ffff', '#ff00ff'];
+    
+    propList.forEach((propName, index) => {
+        const propData = allPropResults[propName];
+        if (!propData.results[selectedAltitude]) return;
+
+        const results = propData.results[selectedAltitude];
+        const airspeed = [];
+        const maxThrust = [];
+
+        Object.keys(results).sort((a, b) => Number(a) - Number(b)).forEach(velocity => {
+            if (velocity < 10) return;
+            const data = results[velocity];
+            airspeed.push(parseFloat(velocity));
+            maxThrust.push(parseFloat(data.thrust) || 0);
+        });
+
+        datasets.push({
+            label: `${propName.replace('_', 'x')} (${propSummary[propName].diameter}"x${propSummary[propName].pitch}")`,
+            data: maxThrust,
+            borderColor: colors[index % colors.length],
+            borderWidth: 2,
+            fill: false,
+            pointRadius: 2
+        });
+    });
+
+    updateChart("propComparisonChart", {
+        type: "line",
+        data: { labels: datasets[0]?.data.map((_, i) => i + 10) || [], datasets: datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { title: { display: true, text: "Airspeed (mph)" }},
+                y: { title: { display: true, text: "Max Thrust Available (oz)" }}
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: `Propeller Thrust Comparison at ${selectedAltitude} ft`
+                }
+            }
+        }
+    });
+}
+
+function updateChart(chartId, config) {
+    const ctx = document.getElementById(chartId);
+    if (!ctx) return;
+
+    if (chartInstances[chartId]) {
+        chartInstances[chartId].destroy();
+    }
+    
+    chartInstances[chartId] = new Chart(ctx.getContext("2d"), config);
+}
+
+function downloadTableData() {
+    const table = elements.resultsTable;
+    let csvContent = "data:text/csv;charset=utf-8,";
+    let fileName = prompt("Enter file name: ", `${currentProp}_results.csv`);
+    
+    if (!fileName) return;
+
+    // Get headers
     let headers = [];
     table.querySelectorAll("thead th").forEach(th => {
         headers.push(th.innerText);
     });
     csvContent += headers.join(",") + "\n";
 
-    // Get table rows
+    // Get rows
     table.querySelectorAll("tbody tr").forEach(row => {
         let rowData = [];
         row.querySelectorAll("td").forEach(td => {
@@ -23,7 +590,7 @@ document.getElementById("downloadTable").addEventListener("click", function () {
         csvContent += rowData.join(",") + "\n";
     });
 
-    // Create a download link and trigger it
+    // Download
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
@@ -31,522 +598,21 @@ document.getElementById("downloadTable").addEventListener("click", function () {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-});
-
-
-const requirements = [
-    [30, 45], // Flight time, minutes
-    [6000, 9000], // Max Cruise Altitude (asl)
-    [25, 20], // Stall speed
-    [45, 50] // Max Speed
-]
-
-function removeClasses(req) {
-    if (req.classList.contains("notMet")) {
-        req.classList.remove("notMet");
-    } else if (req.classList.contains("threshold")) {
-        req.classList.remove("threshold");
-    } else if (req.classList.contains("objective")) {
-        req.classList.remove("objective");
-    }
-
 }
 
-document.addEventListener("DOMContentLoaded", function () {
-    const toggleButton = document.getElementById("toggleButton");
-    const resultsTable = document.getElementById("resultsTable");
-    const altitudeSelect = document.getElementById("altitudeSelect");
-    const req1 = document.getElementById("requirement1");
-    const req2 = document.getElementById("requirement2");
-    const req3 = document.getElementById("requirement3");
-    const req4 = document.getElementById("requirement4");
-    let chartInstance1 = null;
-    let chartInstance2 = null;
-    console.log(motorToggle);
+function calcBatt(time, current) {
+    return (time / 60) * current * 1000;
+}
 
-    toggleButton.addEventListener("click", function () {
-        if (resultsTable.classList.contains("hidden")) {
-            resultsTable.classList.remove("hidden");
-            toggleButton.textContent = "Hide Table";
-        } else {
-            resultsTable.classList.add("hidden");
-            toggleButton.textContent = "Show Table";
-        }
+// Initialize the application
+if (motorToggle === "false") {
+    // Hide motor-specific UI elements
+    document.addEventListener("DOMContentLoaded", function() {
+        elements.bestPropSection.style.display = "none";
+        elements.propSummarySection.style.display = "none";
+        elements.comparisonSection.style.display = "none";
+        elements.showAllProps.style.display = "none";
+        elements.showComparison.style.display = "none";
+        elements.propSelect.parentElement.style.display = "none";
     });
-
-    function loadResults() {
-        
-        let maxEndurance;
-        let maxEnduranceVelocity;
-        let maxEnduranceAltitude;
-        let maxCalcVelocity;
-        let maxCalcVelocityAltitude;
-        let minCalcVelocity;
-        let minCalcVelocityAltitude;
-        let maxAltitude;
-        let results;
-        let maxResults;
-        console.log("loadResults motorToggle", motorToggle)
-        if (motorToggle == "true") {
-            console.log("in first")
-            results = JSON.parse(localStorage.getItem("analysisResults"));
-            maxResults = JSON.parse(localStorage.getItem("maxResults"));
-            maxEndurance = maxResults.endurance.maxEndurance;
-            maxEnduranceVelocity = maxResults.endurance.maxEnduranceVelocity;
-            maxEnduranceAltitude = maxResults.endurance.maxEnduranceAltitude;
-            maxEnduranceAmps = maxResults.endurance.maxEnduranceAmps;
-            maxCalcVelocity = maxResults.maxSpeed.maxCalcVelocity;
-            maxCalcVelocityAltitude = maxResults.maxSpeed.maxCalcVelocityAltitude;
-            minCalcVelocity = maxResults.minSpeed.minCalcVelocity;
-            minCalcVelocityAltitude = maxResults.minSpeed.minCalcVelocityAltitude;
-            maxAltitude = maxResults.maxAltitude;
-            weight = maxResults.weight;
-        } else if (motorToggle == "false"){
-            console.log("in second")
-            results = JSON.parse(localStorage.getItem("analysisResultsNoThrust")) || {};
-            maxResults = JSON.parse(localStorage.getItem("maxResults")) || {};
-            minCalcVelocity = maxResults.minSpeed.minCalcVelocity;
-            minCalcVelocityAltitude = maxResults.minSpeed.minCalcVelocityAltitude;
-            weight = maxResults.weight;
-        }
-        console.log(results);
-
-        
-        // update requirements as needed
-        if (motorToggle == "true") {
-            // requirement 1
-            if (requirements[0][1] < maxEndurance ) {
-                req1.classList.add("objective");
-                req1.innerHTML += "Objective";
-            } else if (requirements[0][0] < maxEndurance ) {
-                req1.classList.add("threshold");
-                req1.innerHTML += "Threshold";
-            } else {
-                req1.classList.add("notMet");
-                req1.innerHTML += "Not Met";
-            }
-            //requirement 2
-            if (requirements[1][1] <= maxAltitude ) {
-                req2.classList.add("objective");
-                req2.innerHTML += "Objective";
-            } else if (requirements[1][0] < maxAltitude ) {
-                req2.classList.add("threshold");
-                req2.innerHTML += "Threshold";
-            } else {
-                req2.classList.add("notMet");
-                req2.innerHTML += "Not Met";
-            }
-
-            //requirement 4
-            if (requirements[3][1] < maxCalcVelocity) {
-                req4.classList.add("objective");
-                req4.innerHTML += "Objective"
-            } else if (requirements[3][0] < maxCalcVelocity) {
-                req4.classList.add("threshold");
-                req4.innerHTML += "Threshold";
-            } else {
-                req4.classList.add("notMet");
-                req4.innerHTML += "Not Met";
-            }
-            
-            // calculate minimum battery capacity needed for objectives
-            function calcBatt(time, current) {
-                return (time / 60) * current * 1000;
-            }
-            batteryThreshold = calcBatt(30, maxEnduranceAmps);
-            batteryObjective = calcBatt(45, maxEnduranceAmps);
-
-
-            document.getElementById("resultLog").innerHTML = `
-            Max endurance is ${maxEndurance.toFixed(0)} minutes traveling at ${maxEnduranceVelocity} mph at ${maxEnduranceAltitude.toFixed(0)} ft (msl) pulling ${maxEnduranceAmps.toFixed(2)} amps.<br>
-            Battery capacity required for: Threshold: ${batteryThreshold.toFixed(0)}mAh, Objective: ${batteryObjective.toFixed(0)}mAh.<br>
-            Max speed is ${maxCalcVelocity} mph at ${maxCalcVelocityAltitude.toFixed(0)} ft (msl).<br>
-            Min stall speed is ${minCalcVelocity} mph at ${minCalcVelocityAltitude.toFixed(0)} ft (msl).<br>
-            Maximum calculated altitude is ${maxAltitude} ft (msl).`;
-
-        } else {
-            req1.innerHTML += ("Not Available");
-            req2.innerHTML += ("Not Available");
-            req4.innerHTML += ("Not Available");
-            
-            document.getElementById("resultLog").innerHTML = `
-            Max endurance is unavailable.<br>
-            Max speed is unavailable.<br>
-            Min stall speed is ${minCalcVelocity} mph.<br>
-            Maximum calculated altitude is unavailable.`;
-        }
-
-        //requirement 3
-        if (requirements[2][1] > minCalcVelocity) {
-            req3.classList.add("objective");
-            req3.innerHTML += "Objective";
-        } else if (requirements[2][0] > minCalcVelocity) {
-            req3.classList.add("threshold");
-            req3.innerHTML += "Threshold";
-        } else {
-            req3.classList.add("notMet");
-            req3.innerHTML += "Not Met";
-        }
-    
-        altitudeSelect.innerHTML = ""; // Clear previous options
-
-        for (let altitude in results) {
-            let option = document.createElement("option");
-            option.value = altitude;
-            option.textContent = altitude + " ft";
-            altitudeSelect.appendChild(option);
-        }
-
-        if (altitudeSelect.options.length > 0) {
-            updateTable();
-            drawChart();
-        }
-    }
-
-    function updateTable() {
-        let results;
-        if (motorToggle == "true"){
-            results = JSON.parse(localStorage.getItem("analysisResults"));
-            altitudeInfo = JSON.parse(localStorage.getItem("altResults"));
-        } else {
-            results = JSON.parse(localStorage.getItem("analysisResultsNoThrust"));
-        }
-
-        const selectedAltitude = altitudeSelect.value;
-        const altitudeBar = document.getElementById("altitudeInformation");
-        const tableBody = document.querySelector("#resultsTable tbody");
-        tableBody.innerHTML = ""; // Clear existing rows
-        if (results[selectedAltitude]) {
-            for (let velocity in results[selectedAltitude]) {
-                let data = results[selectedAltitude][velocity];
-                
-                if (motorToggle == "true") {
-                    //more performance data here
-                    altitudeBar.innerHTML = `Maximum climb rate at ${selectedAltitude} ft (msl) is ${altitudeInfo[selectedAltitude].maxROC} ft/m flying at
-                     ${altitudeInfo[selectedAltitude].maxROCSpeed} mph at an angle of ${altitudeInfo[selectedAltitude].maxROCAngle} degrees`;
-                }
-
-
-                if (data.AoA > 16 || isNaN(data.throttle) && motorToggle == true) continue;
-
-                let row = document.createElement("tr");
-
-                row.innerHTML = `
-                    <td>${velocity}</td>
-                    <td>${data.dynamicPressure}</td>
-                    <td>${data.coefficientLift}</td>
-                    <td>${data.AoA}</td>
-                    <td>${data.coefficientDrag}</td>
-                    <td>${data.dragOz}</td>
-                    <td>${data.thrust}</td>
-                    <td>${data.lOverD}</td>
-                    <td>${data.endurance}</td>
-                    <td>${data.current}</td>
-                    <td>${data.throttle}</td>
-                `;
-
-                tableBody.appendChild(row);
-            }
-        }
-    }
-
-    function drawChart() {
-        let results;
-        
-        if (motorToggle == "true") {
-            results = JSON.parse(localStorage.getItem("analysisResults")) || {};
-        } else {
-            results = JSON.parse(localStorage.getItem("analysisResultsNoThrust")) || {};
-        }
-        const selectedAltitude = altitudeSelect.value;
-        if (!selectedAltitude || !results[selectedAltitude]) return;
-
-        const airspeed = [];
-        const ldRatio = [];
-        const cLThreeHalfD = [];
-        const thrustAvailable = [];
-        const thrustRequired = [];
-        const current = [];
-        if (motorToggle == "true") {
-            // pull data for propulsion information
-            const propInfo = JSON.parse(localStorage.getItem("propulsionInfo")) || {};
-            const infoBar = document.getElementById("informationBar");
-
-            infoBar.innerHTML = `Motor(s): ${propInfo.motoNum} ${propInfo.motor} | Propellor: ${propInfo.propellor} | Battery: ${propInfo.battery} ${propInfo.batteryCapacity}mAh | Weight: ${weight}lbs`
-
-            for (let velocity in results[selectedAltitude]) {
-                // Skip first 10 vel
-                if (velocity < 10) continue;
-                airspeed.push(parseFloat(velocity));
-                ldRatio.push(results[selectedAltitude][velocity].lOverD);
-                cLThreeHalfD.push(results[selectedAltitude][velocity].cLThreeHalfD);
-                thrustAvailable.push(results[selectedAltitude][velocity].thrust);
-                thrustRequired.push(results[selectedAltitude][velocity].dragOz);
-                current.push(results[selectedAltitude][velocity].current)
-            }
-    
-            const ctx1 = document.getElementById("ldChart").getContext("2d");
-            const ctx2 = document.getElementById("TaTrChart").getContext("2d");
-    
-            if (chartInstance1) { 
-                chartInstance1.destroy(); 
-                chartInstance1 = null;
-            }// Destroy previous chart instance to prevent duplication
-            if (chartInstance2) { 
-                chartInstance2.destroy(); 
-                chartInstance2 = null;
-            }
-    
-    
-            chartInstance1 = new Chart(ctx1, {
-                type: "line",
-                data: {
-                    labels: airspeed,
-                    datasets: [{
-                        label: "L/D Ratio",
-                        data: ldRatio,
-                        borderColor: "blue",
-                        borderWidth: 2,
-                        fill: false,
-                        pointRadius: 5,
-                        pointBackgroundColor: "blue"
-                    }, 
-                    {
-                        label: "cL^(3/2)/cD Ratio",
-                        data: cLThreeHalfD,
-                        borderColor: "green",
-                        borderWidth: 2,
-                        fill: false,
-                        pointRadius: 5,
-                        pointBackgroundColor: "green"
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        x: {
-                            title: {
-                                display: true,
-                                text: "Airspeed (mph)"
-                            }
-                        },
-                        y: {
-                            title: {
-                                display: true,
-                                text: "L/D Ratio"
-                            }
-                        }
-                    }
-                }
-            });
-    
-            const idealSpeeds = [50, 80]; // Example ideal speeds in mph
-    
-            chartInstance2 = new Chart(ctx2, {
-                type: "line",
-                data: {
-                    labels: airspeed,
-                    datasets: [{
-                        label: "Max Thrust Available",
-                        data: thrustAvailable,
-                        borderColor: "blue",
-                        borderWidth: 2,
-                        fill: false,
-                        pointRadius: 5,
-                        pointBackgroundColor: "blue"
-                    }, 
-                    {
-                        label: "Thrust Required",
-                        data: thrustRequired,
-                        borderColor: "red",
-                        borderWidth: 2,
-                        fill: false,
-                        pointRadius: 5,
-                        pointBackgroundColor: "red"
-                    },
-                    {
-                        label: "Current Draw at Thrust Required",
-                        data: current, // Assuming you have an array for current values
-                        borderColor: "green",
-                        borderWidth: 2,
-                        fill: false,
-                        pointRadius: 5,
-                        pointBackgroundColor: "green",
-                        yAxisID: "y1" // Assign to the secondary y-axis
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        x: {
-                            title: {
-                                display: true,
-                                text: "Airspeed (mph)"
-                            }
-                        },
-                        y: {
-                            title: {
-                                display: true,
-                                text: "Thrust (oz)"
-                            }
-                        },
-                        y1: {
-                            title: {
-                                display: true,
-                                text: "Current (A)"
-                            },
-                            position: "right",
-                            grid: {
-                                drawOnChartArea: false // Prevents grid lines from overlapping
-                            }
-                        }   
-    
-                    }
-                },
-                plugins: {
-                    annotation: {
-                        annotations: idealSpeeds.map(speed => ({
-                            type: "line",
-                            mode: "vertical",
-                            scaleID: "x",
-                            value: speed,
-                            borderColor: "black",
-                            borderWidth: 2,
-                            borderDash: [5, 5],
-                            label: {
-                                content: `Ideal Speed: ${speed} mph`,
-                                enabled: true,
-                                position: "top"
-                            }
-                        }))
-                    }
-                }
-            });
-        } else {
-            for (let velocity in results[selectedAltitude]) {
-                // Skip first 10 vel
-                if (velocity < 16) continue;
-                airspeed.push(parseFloat(velocity));
-                ldRatio.push(results[selectedAltitude][velocity].lOverD);
-                cLThreeHalfD.push(results[selectedAltitude][velocity].cLThreeHalfD);
-                thrustRequired.push(results[selectedAltitude][velocity].dragOz);
-            }
-    
-            const ctx1 = document.getElementById("ldChart").getContext("2d");
-            const ctx2 = document.getElementById("TaTrChart").getContext("2d");
-    
-            if (chartInstance1) { 
-                chartInstance1.destroy(); 
-                chartInstance1 = null;
-            }// Destroy previous chart instance to prevent duplication
-            if (chartInstance2) { 
-                chartInstance2.destroy(); 
-                chartInstance2 = null;
-            }
-    
-    
-            chartInstance1 = new Chart(ctx1, {
-                type: "line",
-                data: {
-                    labels: airspeed,
-                    datasets: [{
-                        label: "L/D Ratio",
-                        data: ldRatio,
-                        borderColor: "blue",
-                        borderWidth: 2,
-                        fill: false,
-                        pointRadius: 5,
-                        pointBackgroundColor: "blue"
-                    }, 
-                    {
-                        label: "cL<sup>(3/2)</sup>/cD Ratio",
-                        data: cLThreeHalfD,
-                        borderColor: "green",
-                        borderWidth: 2,
-                        fill: false,
-                        pointRadius: 5,
-                        pointBackgroundColor: "green"
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        x: {
-                            title: {
-                                display: true,
-                                text: "Airspeed (mph)"
-                            }
-                        },
-                        y: {
-                            title: {
-                                display: true,
-                                text: "L/D Ratio"
-                            }
-                        }
-                    }
-                }
-            });
-    
-            const idealSpeeds = [50, 80]; // Example ideal speeds in mph
-    
-            chartInstance2 = new Chart(ctx2, {
-                type: "line",
-                data: {
-                    labels: airspeed,
-                    datasets: [{
-                        label: "Thrust Required",
-                        data: thrustRequired,
-                        borderColor: "red",
-                        borderWidth: 2,
-                        fill: false,
-                        pointRadius: 5,
-                        pointBackgroundColor: "red"
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        x: {
-                            title: {
-                                display: true,
-                                text: "Airspeed (mph)"
-                            }
-                        },
-                        y: {
-                            title: {
-                                display: true,
-                                text: "Thrust (oz)"
-                            }
-                        }
-    
-                    }
-                },
-                plugins: {
-                    annotation: {
-                        annotations: idealSpeeds.map(speed => ({
-                            type: "line",
-                            mode: "vertical",
-                            scaleID: "x",
-                            value: speed,
-                            borderColor: "black",
-                            borderWidth: 2,
-                            borderDash: [5, 5],
-                            label: {
-                                content: `Ideal Speed: ${speed} mph`,
-                                enabled: true,
-                                position: "top"
-                            }
-                        }))
-                    }
-                }
-            });
-        }
-    }
-
-    altitudeSelect.addEventListener("change", function () {
-        updateTable();
-        drawChart();
-    });
-
-    loadResults();
-});
+}

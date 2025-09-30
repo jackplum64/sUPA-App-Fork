@@ -5,36 +5,196 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>sUPA App.</title>
     <link rel="stylesheet" href="./css/style.css">
-    <!-- <script type="module" src="./javaScripts/script.js" defer></script>  -->
     <script src="./javaScripts/script.js" defer></script>
+    <style>
+        /* Progress Bar Styles */
+        .progress-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .progress-container {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            text-align: center;
+            min-width: 400px;
+            max-width: 600px;
+            color: #003366;
+        }
+
+        .progress-title {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 20px;
+            background: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 20px 0;
+            position: relative;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(45deg, #66ccff, #003366);
+            border-radius: 10px;
+            width: 0%;
+            transition: width 0.3s ease;
+            position: relative;
+        }
+
+        .progress-bar::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            width: 100%;
+            background: linear-gradient(
+                90deg,
+                transparent,
+                rgba(255, 255, 255, 0.4),
+                transparent
+            );
+            animation: shimmer 2s infinite;
+        }
+
+        @keyframes shimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+
+        .progress-text {
+            margin: 10px 0;
+            font-size: 1em;
+        }
+
+        .progress-details {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .propeller-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .propeller-item:last-child {
+            border-bottom: none;
+        }
+
+        .propeller-status {
+            font-weight: bold;
+        }
+
+        .status-pending {
+            color: #999;
+        }
+
+        .status-processing {
+            color: #ff8800;
+        }
+
+        .status-complete {
+            color: #00aa00;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #ff8800;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 5px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
 </head>
 <body>
     <h1>sUAS Performance Analyzer Application (sUPA App.) V1.0</h1>
     <p>Created by Andrew Jesus, 2025</p>
+    
+    <!-- Progress Bar Overlay -->
+    <div class="progress-overlay" id="progressOverlay">
+        <div class="progress-container">
+            <div class="progress-title">Processing Propeller Data</div>
+            <div class="progress-bar-container">
+                <div class="progress-bar" id="progressBar"></div>
+            </div>
+            <div class="progress-text" id="progressText">Initializing...</div>
+            <div class="progress-details" id="progressDetails">
+                <div id="propellerList"></div>
+            </div>
+        </div>
+    </div>
+
     <form id="inputForm">
-        <h3>StarCCM Data</h3>
+        <h3>Aircraft Geometry</h3>
         
         <label for="planformArea">Planform Area (ft<sup>2</sup>):</label>
-        <input type="text" id="planformArea"><br>
-    
-        <label for="lSlope">Coefficient Lift Curve Slope:</label>
-        <input type="text" id="lSlope"> x + <input type="text" id="lIntercept"><br>
-    
-        <label for="dC1">Coefficient Drag Curve Equation:</label><br>
-        <input type="text" id="dC1"> x<sup>4</sup> +
-        <input type="text" id="dC2"> x<sup>3</sup> +
-        <input type="text" id="dC3"> x<sup>2</sup> +
-        <input type="text" id="dC4"> x +
-        <input type="text" id="dC5"><br>
+        <input type="text" id="planformArea"><br><br>
+        
+        <h3>Aerodynamic Data Input Method</h3>
+        
+        <label for="csvModeToggle">Use CSV Aerodynamic Data:</label>
+        <input type="checkbox" id="csvModeToggle"><br><br>
+        
+        <!-- CSV Input Section -->
+        <div id="csvInputGroup" style="display:none;">
+            <label for="aeroCSVInput">Aerodynamic CSV File:</label>
+            <input type="file" id="aeroCSVInput" accept=".csv"><br>
+            <small><em>CSV format: Velocity,lSlope,lIntercept,dC1,dC2,dC3,dC4,dC5</em></small><br><br>
+        </div>
+        
+        <!-- Polynomial Input Section -->
+        <div id="polynomialInputGroup">
+            <h4>StarCCM Polynomial Data</h4>
+            
+            <label for="lSlope">Coefficient Lift Curve Slope:</label>
+            <input type="text" id="lSlope"> x + <input type="text" id="lIntercept"><br>
+        
+            <label for="dC1">Coefficient Drag Curve Equation:</label><br>
+            <input type="text" id="dC1"> x<sup>4</sup> +
+            <input type="text" id="dC2"> x<sup>3</sup> +
+            <input type="text" id="dC3"> x<sup>2</sup> +
+            <input type="text" id="dC4"> x +
+            <input type="text" id="dC5"><br><br>
+        </div>
     
         <h3>Other Aircraft Information</h3>
         <label for="weight">Aircraft Dry Weight (lb): </label>
         <input type="text" id="weight"><br>
     
         <label for="pWeight">Payload Weight (0-1.5lbs): </label>
-        <input type="text" id="pWeight"><br>
+        <input type="text" id="pWeight"><br><br>
     
-        <p>Propulsion Setup</p>
+        <h3>Propulsion Setup</h3>
         
         <label for="uploadToggle">Upload Propulsion Data?</label>
         <input type="checkbox" id="uploadToggle"><br><br>
@@ -52,13 +212,132 @@
     </form>
     
     <script>
+        // Progress Bar Management Class
+        class ProgressManager {
+            constructor() {
+                this.overlay = document.getElementById('progressOverlay');
+                this.progressBar = document.getElementById('progressBar');
+                this.progressText = document.getElementById('progressText');
+                this.progressDetails = document.getElementById('progressDetails');
+                this.propellerList = document.getElementById('propellerList');
+                this.totalTasks = 0;
+                this.completedTasks = 0;
+                this.propellers = {};
+            }
+
+            show() {
+                this.overlay.style.display = 'flex';
+                document.body.style.overflow = 'hidden';
+            }
+
+            hide() {
+                this.overlay.style.display = 'none';
+                document.body.style.overflow = 'auto';
+            }
+
+            initialize(propellerNames, filesPerProp) {
+                this.totalTasks = propellerNames.length * filesPerProp;
+                this.completedTasks = 0;
+                this.propellers = {};
+                
+                // Initialize propeller status
+                propellerNames.forEach(name => {
+                    this.propellers[name] = {
+                        status: 'pending',
+                        filesProcessed: 0,
+                        totalFiles: filesPerProp
+                    };
+                });
+
+                this.updateDisplay();
+                this.renderPropellerList();
+            }
+
+            updatePropellerProgress(propName, filesCompleted, status = 'processing') {
+                if (this.propellers[propName]) {
+                    const prevFiles = this.propellers[propName].filesProcessed;
+                    this.propellers[propName].filesProcessed = filesCompleted;
+                    this.propellers[propName].status = status;
+                    
+                    // Update total completed tasks
+                    this.completedTasks += (filesCompleted - prevFiles);
+                    
+                    this.updateDisplay();
+                    this.renderPropellerList();
+                }
+            }
+
+            updateDisplay() {
+                const percentage = Math.min((this.completedTasks / this.totalTasks) * 100, 100);
+                this.progressBar.style.width = percentage + '%';
+                
+                const currentProp = Object.keys(this.propellers).find(prop => 
+                    this.propellers[prop].status === 'processing'
+                );
+                
+                if (currentProp) {
+                    this.progressText.textContent = `Processing ${currentProp.replace('_', 'x')} propeller... (${this.completedTasks}/${this.totalTasks} files)`;
+                } else if (percentage >= 100) {
+                    this.progressText.textContent = 'Running analysis calculations...';
+                } else {
+                    this.progressText.textContent = `${Math.round(percentage)}% Complete (${this.completedTasks}/${this.totalTasks} files)`;
+                }
+            }
+
+            renderPropellerList() {
+                this.propellerList.innerHTML = Object.keys(this.propellers).map(propName => {
+                    const prop = this.propellers[propName];
+                    const statusClass = `status-${prop.status}`;
+                    const statusText = prop.status === 'pending' ? 'Pending' :
+                                     prop.status === 'processing' ? 'Processing...' : 'Complete';
+                    
+                    return `
+                        <div class="propeller-item">
+                            <span>${propName.replace('_', 'x')} (${prop.filesProcessed}/${prop.totalFiles})</span>
+                            <span class="propeller-status ${statusClass}">
+                                ${prop.status === 'processing' ? '<span class="spinner"></span>' : ''}
+                                ${statusText}
+                            </span>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            setComplete() {
+                this.progressText.textContent = 'Analysis complete! Redirecting...';
+                this.progressBar.style.width = '100%';
+                Object.keys(this.propellers).forEach(prop => {
+                    this.propellers[prop].status = 'complete';
+                });
+                this.renderPropellerList();
+                setTimeout(() => this.hide(), 1500);
+            }
+        }
+
+        // Create global progress manager instance
+        window.progressManager = new ProgressManager();
+
+        // Toggle motor upload section
         document.getElementById('uploadToggle').addEventListener('change', function() {
             const fileSection = document.getElementById('fileUploadSection');
             fileSection.style.display = this.checked ? 'block' : 'none';
         });
+        
+        // Toggle aerodynamic input method
+        document.getElementById('csvModeToggle').addEventListener('change', function() {
+            const csvGroup = document.getElementById('csvInputGroup');
+            const polynomialGroup = document.getElementById('polynomialInputGroup');
+            
+            if (this.checked) {
+                csvGroup.style.display = 'block';
+                polynomialGroup.style.display = 'none';
+            } else {
+                csvGroup.style.display = 'none';
+                polynomialGroup.style.display = 'block';
+            }
+        });
     </script>
     
-    </div>
     <footer>
         <a class="donate" href="https://venmo.com/u/Andrew-Jesus" target="_blank">Buy me a coffee! &#9749;</a>
     </footer>
